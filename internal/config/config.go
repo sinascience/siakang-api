@@ -49,6 +49,12 @@ type DatabaseConfig struct {
 }
 
 type ServerConfig struct {
+	// Host is the bind address. It defaults to loopback so a dev run does
+	// not open a listener on every interface — on Windows that triggers a
+	// Security Alert on every start, and `go run` builds to a fresh temp
+	// path each time, so "Allow" never sticks. Production sets
+	// SERVER_HOST=0.0.0.0.
+	Host string
 	Port string
 	Env  string
 }
@@ -101,6 +107,7 @@ func Load() *Config {
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
 		Server: ServerConfig{
+			Host: getEnv("SERVER_HOST", "127.0.0.1"),
 			Port: getEnv("SERVER_PORT", "8080"),
 			Env:  getEnv("ENV", "development"),
 		},

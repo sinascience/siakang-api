@@ -51,8 +51,9 @@ func main() {
 	// Setup routes (all modules initialized inside router)
 	router.Setup(ginRouter, db.Pool, cfg)
 
-	// Start server
-	serverAddr := ":" + cfg.Server.Port
+	// Start server. Binds SERVER_HOST (default 127.0.0.1) rather than every
+	// interface — see ServerConfig.Host.
+	serverAddr := cfg.Server.Host + ":" + cfg.Server.Port
 	logger.Info("Starting server on " + serverAddr + " (Environment: " + cfg.Server.Env + ")")
 
 	if err := ginRouter.Run(serverAddr); err != nil {
