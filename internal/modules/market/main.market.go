@@ -30,9 +30,9 @@ type Module struct {
 	db *pgxpool.Pool
 
 	// MARKET SUBMODULE FIELDS — add yours here, one line.
-	Me     *me.Module
-	Config *config.Module
-	Wallet *wallet.Module
+	Me      *me.Module
+	Config  *config.Module
+	Wallet  *wallet.Module
 	Product *product.Module
 }
 
