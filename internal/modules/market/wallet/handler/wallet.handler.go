@@ -10,6 +10,7 @@ import (
 	"siakang-api/internal/modules/market/wallet/dto"
 	"siakang-api/internal/modules/market/wallet/repository"
 	"siakang-api/internal/shared/response"
+	"siakang-api/pkg/logger"
 )
 
 // Handler calls the repository directly — two reads with no business logic
@@ -36,7 +37,17 @@ func (h *Handler) GetWallet(c *gin.Context) {
 	wallet, err := h.repo.GetWallet(c.Request.Context(), userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrWalletNotFound) {
-			response.Error(c, http.StatusNotFound, "Wallet not found", "")
+			// The contract defines only 200/401 for this endpoint — no 404.
+			// "No wallet row" and "no money" are the same fact to the
+			// caller (a self-registered core.users row has no market
+			// provisioning yet), so answer 200 with a zero balance. The
+			// warning keeps a genuine provisioning gap visible in the logs
+			// instead of silently passing as a normal empty wallet.
+			logger.Warn("Wallet row missing for user, returning zero balance", logger.String("user_id", userID))
+			response.Success(c, http.StatusOK, "Wallet retrieved successfully", dto.WalletResponse{
+				UserID:     userID,
+				BalanceIDR: 0,
+			})
 			return
 		}
 		response.Error(c, http.StatusInternalServerError, "Failed to get wallet", err.Error())

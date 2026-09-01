@@ -11,9 +11,12 @@ import (
 	"siakang-api/pkg/logger"
 )
 
-// ErrWalletNotFound means this user has no market.wallets row. Not expected
-// in sprint 1 (every seeded actor has one) but core.users can outpace the
-// market schema, so the handler still has something sane to map to a 404.
+// ErrWalletNotFound means this user has no market.wallets row — reachable
+// via plain signup, which creates a core.users row with no market
+// provisioning behind it. The contract has no 404 for GET /wallet, so the
+// handler maps this to 200/balance_idr:0 rather than an error status; it
+// stays a distinct error here so that mapping is a deliberate handler
+// decision, logged as a warning, not a silently absorbed one.
 var ErrWalletNotFound = errors.New("wallet not found")
 
 type Repository struct {
@@ -55,11 +58,16 @@ func (r *Repository) GetLedger(ctx context.Context, userID string, page, limit i
 		return nil, 0, err
 	}
 
+	// id DESC is a tiebreak, not decoration: created_at defaults to NOW(),
+	// which in Postgres is the TRANSACTION timestamp, so two rows written in
+	// the same transaction (e.g. an auto-bid's fee + its no_match refund)
+	// share one created_at. Without a tiebreak their relative order is
+	// undefined, and a row can appear on two LIMIT/OFFSET pages or on none.
 	const dataQuery = `
 		SELECT id, type, amount_idr, balance_after_idr, order_id, bid_id, note, created_at
 		FROM market.ledger_entries
 		WHERE user_id = $1
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 		LIMIT $2 OFFSET $3
 	`
 	offset := (page - 1) * limit
