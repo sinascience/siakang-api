@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Security Alert</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: #EF4444;
+            color: #fff;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .alert-box {
+            background: #FEE2E2;
+            border-left: 4px solid #EF4444;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .info-box {
+            background: #DBEAFE;
+            border-left: 4px solid #3B82F6;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .footer {
+            background: #f9fafb;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .link {
+            color: #EF4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔒 Account Security Alert</h1>
+        </div>
+        <div class="content">
+            <h2>Hi {{.Name}},</h2>
+
+            <div class="alert-box">
+                <strong>⚠️ Your account has been temporarily locked</strong>
+                <p style="margin: 10px 0 0 0;">We detected multiple failed login attempts on your account.</p>
+            </div>
+
+            <p>To protect your account security, we've temporarily locked your account.</p>
+
+            <div class="info-box">
+                <strong>What happens next?</strong>
+                <ul style="margin: 5px 0;">
+                    <li>Your account will be automatically unlocked in 30 minutes</li>
+                    <li>You can reset your password if you've forgotten it</li>
+                    <li>Contact support if you need immediate assistance</li>
+                </ul>
+            </div>
+
+            <p><strong>Didn't try to log in?</strong></p>
+            <p>If you didn't attempt to access your account, please reset your password immediately and contact our support team.</p>
+
+            <p>Best regards,<br>The {{.AppName}} Security Team</p>
+        </div>
+        <div class="footer">
+            <p>© {{.Year}} {{.AppName}}. All rights reserved.</p>
+            <p>Need help? Contact us at <a href="mailto:{{.SupportEmail}}" class="link">{{.SupportEmail}}</a></p>
+        </div>
+    </div>
+</body>
+</html>
