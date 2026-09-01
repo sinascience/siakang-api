@@ -13,6 +13,15 @@ type Pagination struct {
 // Meta represents response metadata
 type Meta struct {
 	Pagination *Pagination `json:"pagination,omitempty"`
+
+	// Counts carries per-bucket totals alongside a page of results — order
+	// counts per status, for the FE's tab badges. A map rather than a typed
+	// struct because the buckets belong to the endpoint (order statuses
+	// here, something else later), not to the envelope.
+	//
+	// omitempty keeps it absent from every response that does not set it,
+	// so adding this field changed no existing response body.
+	Counts map[string]int64 `json:"counts,omitempty"`
 }
 
 // Response represents standard API response structure
@@ -48,6 +57,39 @@ func SuccessWithPagination(c *gin.Context, statusCode int, message string, data 
 				Total:      total,
 				TotalPages: totalPages,
 			},
+		},
+	})
+}
+
+// SuccessWithPaginationAndCounts is SuccessWithPagination plus per-bucket
+// totals in meta.counts. Split into its own function rather than added as a
+// parameter so that none of the existing call sites change.
+//
+// counts is expected to cover the whole filtered set and to ignore the
+// endpoint's own bucket filter — for orders that means the status counts are
+// the same whether or not ?status= was supplied, which is what lets one
+// request drive every tab badge. Passing nil is the same as calling
+// SuccessWithPagination.
+func SuccessWithPaginationAndCounts(c *gin.Context, statusCode int, message string, data interface{}, page, limit int, total int64, counts map[string]int64) {
+	totalPages := 0
+	if limit > 0 {
+		totalPages = int(total) / limit
+		if int(total)%limit > 0 {
+			totalPages++
+		}
+	}
+
+	c.JSON(statusCode, Response{
+		Data:    data,
+		Message: message,
+		Meta: &Meta{
+			Pagination: &Pagination{
+				Page:       page,
+				Limit:      limit,
+				Total:      total,
+				TotalPages: totalPages,
+			},
+			Counts: counts,
 		},
 	})
 }
