@@ -1,4 +1,4 @@
-.PHONY: help migrate-up migrate-down migrate-create migrate-force migrate-version seed seed-core db-setup db-reset dev build run
+.PHONY: help migrate-up migrate-down migrate-create migrate-force migrate-version seed seed-core seed-market db-setup db-reset dev build run
 
 help:
 	@echo "Available commands:"
@@ -18,6 +18,7 @@ help:
 	@echo "Seeding commands:"
 	@echo "  make seed                    - Run all seeders"
 	@echo "  make seed-core               - Run core module seeders only"
+	@echo "  make seed-market             - Run market module seeders only"
 	@echo ""
 	@echo "Setup commands:"
 	@echo "  make db-setup                - Run migrations + seeders (fresh setup)"
@@ -72,7 +73,21 @@ seed-core:
 	fi
 	@echo "✅ Core seeders completed!"
 
-seed: seed-core
+seed-market:
+	@echo "Running market seeders..."
+	@if [ -d "$(SEEDERS_PATH)/market" ]; then \
+		for file in $(SEEDERS_PATH)/market/*.sql; do \
+			if [ -f "$$file" ]; then \
+				echo "Running seeder: $$(basename $$file)"; \
+				PGPASSWORD=$(DB_PASSWORD) psql -v ON_ERROR_STOP=1 -h $(DB_HOST) -p $(DB_PORT) -U $(DB_USER) -d $(DB_NAME) -f $$file || exit 1; \
+			fi; \
+		done; \
+	fi
+	@echo "✅ Market seeders completed!"
+
+# Order matters: market seeders insert into core.users / core.roles /
+# core.user_roles, so core must be seeded first.
+seed: seed-core seed-market
 	@echo "✅ All seeders completed!"
 
 # Database setup commands
