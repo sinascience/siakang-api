@@ -2,9 +2,9 @@ package router
 
 import (
 	"context"
-	"time"
 	"siakang-api/internal/config"
 	"siakang-api/internal/middleware"
+	"time"
 
 	// Core modules
 	"siakang-api/internal/modules/core/api_key"
@@ -16,7 +16,10 @@ import (
 	"siakang-api/internal/modules/core/role"
 	"siakang-api/internal/modules/core/translation_overrides"
 	"siakang-api/internal/modules/core/user"
+
+	// Market modules
 	userRepo "siakang-api/internal/modules/core/user/repository"
+	"siakang-api/internal/modules/market"
 
 	"siakang-api/internal/shared/audit"
 	"siakang-api/internal/shared/authz"
@@ -206,6 +209,18 @@ func Setup(router *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 	// mount under /core/v1.
 	auditModule := audit.Initialize(db)
 	auditModule.SetupRoutes(coreV1)
+
+	// ─── Market domain (SIAKANG marketplace) ────────────────────────
+	// Mounted at /market/v1, outside the core group: marketplace routes
+	// run JWTAuth() only — no CompanyContext(), no RequirePermission() —
+	// and no market table is company-scoped (product ruling 2026-09-02,
+	// see docs/architecture/market-tenancy-deviation.md).
+	//
+	// Marketplace submodules register inside market.Module, NOT here, so
+	// that adding a feature touches one market-owned file instead of this
+	// router that every module shares.
+	marketModule := market.Initialize(db)
+	marketModule.SetupRoutes(router.Group(""))
 
 	log.Info("Routes setup completed", zap.Int("routes", len(router.Routes())))
 }
