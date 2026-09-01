@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"siakang-api/internal/modules/market/product/domain"
 	"siakang-api/internal/modules/market/product/dto"
@@ -62,11 +63,15 @@ func (h *Handler) List(c *gin.Context) {
 		items, params.Page, params.Limit, total)
 }
 
-// Get handles GET /market/v1/products/{id}.
+// Get handles GET /market/v1/products/{id}. A malformed id gets the same
+// 404 as a well-formed but unknown one — the contract's NotFound response
+// deliberately keeps "no such resource" and "not a participant" (here:
+// cannot even name a resource) indistinguishable, rather than 500ing on
+// input the client controls.
 func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
-	if id == "" {
-		response.Error(c, http.StatusBadRequest, "Product ID is required", "")
+	if _, err := uuid.Parse(id); err != nil {
+		response.Error(c, http.StatusNotFound, "Product not found", "")
 		return
 	}
 
