@@ -192,6 +192,14 @@ func (r *Repository) GetByID(ctx context.Context, id, companyID string) (*domain
 - Always filter by `company_id` in repository queries
 - Use `CompanyContext()` middleware for tenant-isolated endpoints
 
+**Exception — the `market` schema is deliberately NOT company-scoped.** SIAKANG's
+marketplace tables carry no `company_id`, `/market/v1/*` runs `JWTAuth()` only
+(no `CompanyContext()`, no `RequirePermission()`), and authorization is
+ownership-based in repository `WHERE` clauses. Product ruling 2026-09-02.
+Reasoning and the full list of consequences:
+[docs/architecture/market-tenancy-deviation.md](docs/architecture/market-tenancy-deviation.md).
+Adding `company_id` to a `market` table "for consistency" is a bug, not a fix.
+
 ### Hot Reload (Air)
 
 - Configured in `.air.toml`
