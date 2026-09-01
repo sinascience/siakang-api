@@ -306,11 +306,17 @@ func (r *Repository) attach(ctx context.Context, db DB, orders []*domain.Order) 
 
 func (r *Repository) loadItems(ctx context.Context, db DB, orderIDs []string) (map[string][]domain.OrderItem, error) {
 	const query = `
-		SELECT id, order_id, product_id, gig_tier_id, name,
-		       unit_price_idr, quantity, subtotal_idr, status, created_at
-		FROM market.order_items
-		WHERE order_id = ANY($1::uuid[])
-		ORDER BY created_at, id
+		SELECT oi.id, oi.order_id, oi.product_id, oi.gig_tier_id, gt.gig_id,
+		       oi.name, oi.unit_price_idr, oi.quantity, oi.subtotal_idr,
+		       oi.status, oi.created_at
+		FROM market.order_items oi
+		-- Amendment v1.0.3: gig_id travels with the item so a client can reach
+		-- the tier's siblings for the flow-B upsell; nothing else in the
+		-- contract resolves a tier back to its gig. LEFT, because product and
+		-- bid items have no tier.
+		LEFT JOIN market.gig_tiers gt ON gt.id = oi.gig_tier_id
+		WHERE oi.order_id = ANY($1::uuid[])
+		ORDER BY oi.created_at, oi.id
 	`
 	rows, err := db.Query(ctx, query, orderIDs)
 	if err != nil {
@@ -322,7 +328,7 @@ func (r *Repository) loadItems(ctx context.Context, db DB, orderIDs []string) (m
 	out := make(map[string][]domain.OrderItem, len(orderIDs))
 	for rows.Next() {
 		var i domain.OrderItem
-		if err := rows.Scan(&i.ID, &i.OrderID, &i.ProductID, &i.GigTierID, &i.Name,
+		if err := rows.Scan(&i.ID, &i.OrderID, &i.ProductID, &i.GigTierID, &i.GigID, &i.Name,
 			&i.UnitPriceIDR, &i.Quantity, &i.SubtotalIDR, &i.Status, &i.CreatedAt); err != nil {
 			logger.Error("Failed to scan order item", logger.Err(err))
 			return nil, err

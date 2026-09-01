@@ -51,6 +51,7 @@ type OrderItemResponse struct {
 	ID           string    `json:"id"`
 	ProductID    *string   `json:"product_id"`
 	GigTierID    *string   `json:"gig_tier_id"`
+	GigID        *string   `json:"gig_id"`
 	Name         string    `json:"name"`
 	UnitPriceIDR int64     `json:"unit_price_idr"`
 	Quantity     int       `json:"quantity"`
@@ -121,6 +122,7 @@ func NewOrderResponse(o *domain.Order) OrderResponse {
 			ID:           i.ID,
 			ProductID:    i.ProductID,
 			GigTierID:    i.GigTierID,
+			GigID:        i.GigID,
 			Name:         i.Name,
 			UnitPriceIDR: i.UnitPriceIDR,
 			Quantity:     i.Quantity,

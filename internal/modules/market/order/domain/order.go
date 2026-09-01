@@ -50,10 +50,14 @@ type LapakSummary struct {
 // generated column rather than multiplied here, so the API and the database
 // cannot disagree about it.
 type OrderItem struct {
-	ID           string
-	OrderID      string
-	ProductID    *string
-	GigTierID    *string
+	ID        string
+	OrderID   string
+	ProductID *string
+	GigTierID *string
+	// GigID is the tier's parent gig (contract amendment v1.0.3). Non-nil
+	// exactly when GigTierID is, so a client holding an order can offer the
+	// gig's other tiers without scanning the catalogue.
+	GigID        *string
 	Name         string
 	UnitPriceIDR int64
 	Quantity     int
