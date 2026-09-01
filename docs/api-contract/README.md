@@ -1,5 +1,33 @@
 # Tuai API Contract Documentation
 
+> ## ⚠️ 2026-09-02 — most of the links below are dead
+>
+> This file was inherited from the upstream Tuai skeleton. **The Finance and
+> Rental modules do not exist in this repository** — neither their code nor
+> their documentation. 18 of the 24 links below point at files that were never
+> copied here. Do not go looking for them; nothing is missing from your
+> checkout.
+>
+> **What actually exists:** the Core module only —
+> [auth.md](core/auth.md), [user.md](core/user.md), [role.md](core/role.md),
+> [company.md](core/company.md), [branch.md](core/branch.md),
+> [clients.md](core/clients.md), [approval.md](core/approval.md),
+> [audit-logs.md](core/audit-logs.md),
+> [translation-overrides.md](core/translation-overrides.md).
+>
+> **What to copy from** when writing a new module's contract doc: any file in
+> `core/`. They are real, current, and match the code in
+> `internal/modules/core/`.
+>
+> **SIAKANG's own API is not documented here at all.** Its single source of
+> truth is the frozen OpenAPI contract at
+> `siakang-pipeline/contract/api-v1.yaml`, plus
+> [../seed-actors.md](../seed-actors.md) for the seeded fixture.
+>
+> The *patterns* below (response envelope, pagination shape, permission naming,
+> status codes) are still accurate and worth reading. Only the file links and
+> the endpoint counts are stale.
+
 **Last Updated:** 2026-04-19
 **Total Modules:** 3 (Core, Finance, Rental)
 **Total Endpoints Documented:** 135+
