@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"siakang-api/internal/middleware"
+	"siakang-api/internal/modules/market/chat"
 	"siakang-api/internal/modules/market/config"
 	"siakang-api/internal/modules/market/me"
 	"siakang-api/internal/modules/market/order"
@@ -36,6 +37,7 @@ type Module struct {
 	Wallet  *wallet.Module
 	Product *product.Module
 	Order   *order.Module
+	Chat    *chat.Module
 }
 
 // Initialize builds every marketplace submodule.
@@ -48,6 +50,7 @@ func Initialize(db *pgxpool.Pool) *Module {
 	m.Wallet = wallet.Initialize(db)
 	m.Product = product.Initialize(db)
 	m.Order = order.Initialize(db)
+	m.Chat = chat.Initialize(db)
 
 	return m
 }
@@ -69,5 +72,10 @@ func (m *Module) SetupRoutes(router *gin.RouterGroup) {
 		m.Wallet.SetupRoutes(v1)
 		m.Product.SetupRoutes(v1)
 		m.Order.SetupRoutes(v1)
+		m.Chat.SetupRoutes(v1)
 	}
+
+	// Outside the group on purpose: the chat SSE stream takes its token from
+	// a query parameter, so JWTAuth() would reject it before the handler ran.
+	m.Chat.SetupStreamRoute(router)
 }
