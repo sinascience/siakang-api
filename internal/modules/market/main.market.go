@@ -20,6 +20,7 @@ import (
 	"siakang-api/internal/middleware"
 	"siakang-api/internal/modules/market/config"
 	"siakang-api/internal/modules/market/me"
+	"siakang-api/internal/modules/market/wallet"
 )
 
 // Module holds the marketplace submodules. Each is initialized in
@@ -30,6 +31,7 @@ type Module struct {
 	// MARKET SUBMODULE FIELDS — add yours here, one line.
 	Me     *me.Module
 	Config *config.Module
+	Wallet *wallet.Module
 }
 
 // Initialize builds every marketplace submodule.
@@ -39,6 +41,7 @@ func Initialize(db *pgxpool.Pool) *Module {
 	// MARKET SUBMODULE INIT — add yours here.
 	m.Me = me.Initialize(db)
 	m.Config = config.Initialize(db)
+	m.Wallet = wallet.Initialize(db)
 
 	return m
 }
@@ -57,5 +60,6 @@ func (m *Module) SetupRoutes(router *gin.RouterGroup) {
 		// MARKET SUBMODULE ROUTES — mount yours here, one line.
 		m.Me.SetupRoutes(v1)
 		m.Config.SetupRoutes(v1)
+		m.Wallet.SetupRoutes(v1)
 	}
 }
