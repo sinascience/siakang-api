@@ -31,6 +31,20 @@ INSERT INTO core.users (id, email, username, password_hash, full_name, phone, is
     TRUE,
     NOW()
 ),
+-- Siti - the SECOND customer. She exists only to be the non-participant in
+-- ownership assertions ("someone else's order" must 404), so those tests have
+-- a stable actor instead of an ad-hoc signup. Contract amendment v1.0.4.
+(
+    '10000000-0000-0000-0000-000000000015',
+    'siti@siakang.test',
+    'siti',
+    '$2a$10$3j9hQIZsnPh08l7/fKIuqOWBIE1WlL8l.XN/Y1znBXzPH2s3LhN3y', -- siakang123
+    'Siti Rahayu',
+    '+6281234500015',
+    TRUE,
+    TRUE,
+    NOW()
+),
 -- Joko - lapak, NEAREST available to Budi. The expected automatic match
 -- and the counterparty for the gig/upsell and chat criteria.
 (

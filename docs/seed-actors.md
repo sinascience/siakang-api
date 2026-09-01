@@ -27,6 +27,7 @@ Sign in at `POST /core/v1/auth/signin` with `{"login": "<email>", "password": "s
 | Persona | Login | Full name | User id |
 |---|---|---|---|
 | customer | `budi@siakang.test` | Budi Santoso | `10000000-0000-0000-0000-000000000011` |
+| customer | `siti@siakang.test` | Siti Rahayu | `10000000-0000-0000-0000-000000000015` |
 | lapak | `joko@siakang.test` | Joko Prasetyo | `10000000-0000-0000-0000-000000000012` |
 | lapak | `sari@siakang.test` | Sari Wulandari | `10000000-0000-0000-0000-000000000013` |
 | lapak | `agus@siakang.test` | Agus Setiawan | `10000000-0000-0000-0000-000000000014` |
@@ -39,6 +40,32 @@ carries `customer` or `lapak`. That is correct: no marketplace flow calls
 
 The persona itself is a **global** role assignment — `core.user_roles` with
 `company_id IS NULL` — which is why no core code changed to support it.
+
+
+### Siti — the ownership-assertion actor (contract amendment v1.0.4)
+
+Siti exists for one job: to be the customer who is **not** the participant, so
+that "someone else's order must 404" has a stable actor. Before her, tasks
+created one ad hoc through `POST /core/v1/auth/signup` — which worked until a
+database reset removed it, and orphaned a `core.companies` row on every
+recreation because signup requires a company name.
+
+**Her wallet is 100 000 IDR, and the number is deliberate:**
+
+| Assertion | Siti works? | Why |
+|---|---|---|
+| Ownership — reading/paying someone else's order 404s | **yes** | She is on no order |
+| Insufficient balance on a **purchase** → 402 | **yes** | Every catalogue price exceeds 100 000, so no need to drain Budi |
+| Insufficient balance on a **platform fee** → 402 | **NO** | She affords both the 2 500 auto-bid and 10 000 manual-award fees. Fee-rejection paths need a **drained** wallet |
+| Pay a fee, then fail to pay the resulting order | **yes** | She can afford the 2 500 auto-bid fee but not the order it produces |
+
+Do not write "Siti is the 402 actor" without that qualifier — she covers
+purchases, not fees.
+
+Note that a **failed** purchase charges nothing at any balance: the 402 is
+raised before any write (`order.service.go`, step 4). Her balance is not what
+makes a refusal safe; it is what lets her succeed at paying a fee while still
+being refused a purchase.
 
 ## Wallets
 

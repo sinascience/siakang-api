@@ -30,8 +30,33 @@ MIGRATIONS_PATH=internal/database/migrations
 SEEDERS_PATH=internal/database/seeders
 
 # Default values from .env
+# Capture any connection settings already in the environment BEFORE .env is
+# included. GNU make gives file assignments precedence over the environment,
+# so `include .env` silently discards `DB_PORT=55433 make run` — the prefix
+# form loses with no warning at all. That cost a phase-2 QA incident on
+# 2026-09-02: QA passed the override in the form its runbook prescribed, the
+# server came up on the wrong database, and two `db-reset` runs landed on the
+# shared dev database instead of the QA one.
+#
+# Re-applying these after the include makes both forms work:
+#   DB_PORT=55433 make run     (env prefix — natural, and now honoured)
+#   make run DB_PORT=55433     (make override — always worked)
+ENV_DB_HOST     := $(DB_HOST)
+ENV_DB_PORT     := $(DB_PORT)
+ENV_DB_USER     := $(DB_USER)
+ENV_DB_PASSWORD := $(DB_PASSWORD)
+ENV_DB_NAME     := $(DB_NAME)
+ENV_SERVER_PORT := $(SERVER_PORT)
+
 include .env
 export
+
+DB_HOST     := $(or $(ENV_DB_HOST),$(DB_HOST))
+DB_PORT     := $(or $(ENV_DB_PORT),$(DB_PORT))
+DB_USER     := $(or $(ENV_DB_USER),$(DB_USER))
+DB_PASSWORD := $(or $(ENV_DB_PASSWORD),$(DB_PASSWORD))
+DB_NAME     := $(or $(ENV_DB_NAME),$(DB_NAME))
+SERVER_PORT := $(or $(ENV_SERVER_PORT),$(SERVER_PORT))
 
 migrate-up:
 	@echo "Running migrations..."

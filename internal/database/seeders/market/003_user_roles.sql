@@ -15,6 +15,12 @@ INSERT INTO core.user_roles (user_id, role_id, company_id) VALUES
     '00000000-0000-0000-0000-000000000003',
     NULL
 ),
+-- Siti -> customer (the ownership-assertion non-participant)
+(
+    '10000000-0000-0000-0000-000000000015',
+    '00000000-0000-0000-0000-000000000003',
+    NULL
+),
 -- Joko -> lapak
 (
     '10000000-0000-0000-0000-000000000012',
