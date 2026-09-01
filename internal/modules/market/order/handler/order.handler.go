@@ -207,6 +207,8 @@ func (h *Handler) AddItem(c *gin.Context) {
 			response.Error(c, http.StatusNotFound, "Order not found", err.Error())
 		case errors.Is(err, repository.ErrGigTierNotFound):
 			response.Error(c, http.StatusNotFound, "Gig tier not found", err.Error())
+		case errors.Is(err, service.ErrWrongParticipant):
+			response.Error(c, http.StatusForbidden, "Caller is not this order's customer", err.Error())
 		case errors.Is(err, service.ErrOrderNotAcceptingItems),
 			errors.Is(err, service.ErrTierDifferentGig):
 			response.Error(c, http.StatusConflict, "Cannot add this item to the order", err.Error())
@@ -240,6 +242,8 @@ func (h *Handler) Complete(c *gin.Context) {
 		switch {
 		case errors.Is(err, repository.ErrOrderNotFound):
 			response.Error(c, http.StatusNotFound, "Order not found", err.Error())
+		case errors.Is(err, service.ErrWrongParticipant):
+			response.Error(c, http.StatusForbidden, "Caller is not this order's lapak", err.Error())
 		case errors.Is(err, service.ErrOutstandingItems),
 			errors.Is(err, repository.ErrOrderNotPaid):
 			response.Error(c, http.StatusConflict, "Order cannot be completed yet", err.Error())
@@ -274,6 +278,8 @@ func (h *Handler) Confirm(c *gin.Context) {
 		switch {
 		case errors.Is(err, repository.ErrOrderNotFound):
 			response.Error(c, http.StatusNotFound, "Order not found", err.Error())
+		case errors.Is(err, service.ErrWrongParticipant):
+			response.Error(c, http.StatusForbidden, "Caller is not this order's customer", err.Error())
 		case errors.Is(err, service.ErrNotAwaitingConfirmation):
 			response.Error(c, http.StatusConflict, "Order is not awaiting confirmation", err.Error())
 		default:

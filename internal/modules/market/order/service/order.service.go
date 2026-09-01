@@ -42,6 +42,17 @@ var (
 	// what starts the clock on paying the lapak.
 	ErrOutstandingItems = errors.New("order has unpaid items")
 
+	// ErrWrongParticipant is the contract's 403 on /items, /complete and
+	// /confirm: the caller IS one side of this order, but not the side whose
+	// verb this is — the lapak confirming, or the customer completing.
+	//
+	// It is deliberately NOT how a stranger is answered. A participant can
+	// already read the order, so "not your action" tells them nothing they
+	// could not see; a non-participant still gets 404, because a 403 would
+	// confirm the order exists. /pay keeps its blanket 404: the contract lists
+	// no 403 there.
+	ErrWrongParticipant = errors.New("this action belongs to the order's other participant")
+
 	// ErrNotAwaitingConfirmation is the contract's 409 on
 	// POST /orders/{id}/confirm. An order already `completed` is NOT this
 	// error: the sweeper getting there first is a race the customer wins a
@@ -327,14 +338,20 @@ func (s *Service) AddItem(ctx context.Context, userID, orderID, gigTierID string
 	// and a 404, never a 403 that would confirm the order exists.
 	status, gigID, err := s.repo.FindOrderForUpsell(ctx, tx, orderID, userID)
 	if err != nil {
+		if errors.Is(err, repository.ErrOrderNotFound) {
+			return nil, s.refuse(ctx, tx, orderID, userID)
+		}
 		return nil, err
 	}
-	// "Allowed while the order is paid and not yet completed." pending_payment
-	// is allowed too: the contract's 409 names awaiting_confirmation,
-	// completed and cancelled, and adding a tier before paying is the same
-	// order the customer would get by paying twice — one charge instead of
-	// two. The three states it does name are the ones where the work is over.
-	if status != domain.StatusPaid && status != domain.StatusPendingPayment {
+	// `paid` ONLY (be-master ruling 2026-09-02): the contract's precondition —
+	// "allowed while the order is paid and not yet completed" — is normative,
+	// and its 409 text describes that state rather than enumerating it.
+	//
+	// pending_payment is refused for a concrete reason: two tiers added before
+	// paying would settle in ONE payment, and criterion 3 is written around
+	// two payment rows on one order. FE only offers the upsell after payment,
+	// so that shape has no way to exist except through this endpoint.
+	if status != domain.StatusPaid {
 		return nil, ErrOrderNotAcceptingItems
 	}
 
@@ -384,16 +401,16 @@ func (s *Service) AddItem(ctx context.Context, userID, orderID, gigTierID string
 // the source guard an earlier plan revision implied would be an off-contract
 // behaviour deviation.
 func (s *Service) Complete(ctx context.Context, userID, orderID string) (*domain.Order, error) {
-	// Completing is the worker's verb. A caller with no lapak profile — every
-	// customer, including this order's own — owns no order as a lapak, so the
-	// answer is the 404 a stranger gets rather than a 403 that would confirm
-	// the order exists.
+	// Completing is the worker's verb, so a caller with no lapak profile owns
+	// no order as a lapak. Whether that is a 403 or a 404 depends on who they
+	// are to THIS order — the order's own customer gets "not your action",
+	// everyone else gets "no such order".
 	lapakID, err := s.repo.LapakIDForUser(ctx, s.repo.Pool(), userID)
 	if err != nil {
 		return nil, err
 	}
 	if lapakID == "" {
-		return nil, repository.ErrOrderNotFound
+		return nil, s.refuse(ctx, s.repo.Pool(), orderID, userID)
 	}
 
 	tx, err := s.repo.Pool().Begin(ctx)
@@ -406,6 +423,9 @@ func (s *Service) Complete(ctx context.Context, userID, orderID string) (*domain
 	// Existence, ownership and the row lock in one statement.
 	status, err := s.repo.FindLapakOrder(ctx, tx, orderID, lapakID)
 	if err != nil {
+		if errors.Is(err, repository.ErrOrderNotFound) {
+			return nil, s.refuse(ctx, tx, orderID, userID)
+		}
 		return nil, err
 	}
 	if status != domain.StatusPaid {
@@ -472,6 +492,9 @@ func (s *Service) Confirm(ctx context.Context, userID, orderID string) (*domain.
 	// for the life of an order, so there is nothing here for the transaction
 	// below to protect.
 	if err := s.repo.FindCustomerOrder(ctx, s.repo.Pool(), orderID, userID); err != nil {
+		if errors.Is(err, repository.ErrOrderNotFound) {
+			return nil, s.refuse(ctx, s.repo.Pool(), orderID, userID)
+		}
 		return nil, err
 	}
 
@@ -694,6 +717,28 @@ func (s *Service) List(ctx context.Context, userID, status string, page, limit i
 		return nil, nil, 0, err
 	}
 	return orders, counts, total, nil
+}
+
+// refuse decides what a failed ownership test means, and is the ONE place the
+// 403/404 fork lives so /items, /complete and /confirm cannot answer it three
+// different ways.
+//
+// It runs only on the failure path — the happy path never pays for it — and
+// asks one question: is this caller the order's other participant? If so the
+// action is simply not theirs (403). If not, they learn nothing (404).
+func (s *Service) refuse(ctx context.Context, db repository.DB, orderID, userID string) error {
+	lapakID, err := s.repo.LapakIDForUser(ctx, db, userID)
+	if err != nil {
+		return err
+	}
+	participant, err := s.repo.IsParticipant(ctx, db, orderID, userID, nullable(lapakID))
+	if err != nil {
+		return err
+	}
+	if participant {
+		return ErrWrongParticipant
+	}
+	return repository.ErrOrderNotFound
 }
 
 // nullable turns "no value" into a SQL NULL, which is what makes the ownership

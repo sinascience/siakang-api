@@ -605,6 +605,29 @@ func (r *Repository) FindGigTier(ctx context.Context, db DB, tierID string) (*do
 	return &t, nil
 }
 
+// IsParticipant reports whether the caller is either side of the order — its
+// customer or its lapak. It is the 403/404 fork: an endpoint's own ownership
+// query has already refused the caller, and this says whether they are the
+// OTHER participant (who can read the order anyway, so "not your action" leaks
+// nothing) or a stranger (who must not learn the order exists).
+//
+// It reuses the same `ownership` fragment every read uses, so the two can
+// never disagree about who counts as a participant.
+func (r *Repository) IsParticipant(ctx context.Context, db DB, orderID, userID string, lapakID *string) (bool, error) {
+	query := `SELECT 1 FROM market.orders o WHERE ` + ownership + ` AND o.id = $3`
+
+	var one int
+	err := db.QueryRow(ctx, query, userID, lapakID, orderID).Scan(&one)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		logger.Error("Failed to test order participation", logger.Err(err))
+		return false, err
+	}
+	return true, nil
+}
+
 // FindOrderForUpsell answers POST /orders/{id}/items' two questions in one
 // round trip: may this caller add to this order (ownership, in the WHERE
 // clause), and which gig is the order already about.
