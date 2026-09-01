@@ -20,6 +20,7 @@ import (
 	"siakang-api/internal/middleware"
 	"siakang-api/internal/modules/market/config"
 	"siakang-api/internal/modules/market/me"
+	"siakang-api/internal/modules/market/product"
 	"siakang-api/internal/modules/market/wallet"
 )
 
@@ -32,6 +33,7 @@ type Module struct {
 	Me     *me.Module
 	Config *config.Module
 	Wallet *wallet.Module
+	Product *product.Module
 }
 
 // Initialize builds every marketplace submodule.
@@ -42,6 +44,7 @@ func Initialize(db *pgxpool.Pool) *Module {
 	m.Me = me.Initialize(db)
 	m.Config = config.Initialize(db)
 	m.Wallet = wallet.Initialize(db)
+	m.Product = product.Initialize(db)
 
 	return m
 }
@@ -61,5 +64,6 @@ func (m *Module) SetupRoutes(router *gin.RouterGroup) {
 		m.Me.SetupRoutes(v1)
 		m.Config.SetupRoutes(v1)
 		m.Wallet.SetupRoutes(v1)
+		m.Product.SetupRoutes(v1)
 	}
 }
