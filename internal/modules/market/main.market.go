@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"siakang-api/internal/middleware"
+	"siakang-api/internal/modules/market/config"
+	"siakang-api/internal/modules/market/me"
 )
 
 // Module holds the marketplace submodules. Each is initialized in
@@ -26,6 +28,8 @@ type Module struct {
 	db *pgxpool.Pool
 
 	// MARKET SUBMODULE FIELDS — add yours here, one line.
+	Me     *me.Module
+	Config *config.Module
 }
 
 // Initialize builds every marketplace submodule.
@@ -33,6 +37,8 @@ func Initialize(db *pgxpool.Pool) *Module {
 	m := &Module{db: db}
 
 	// MARKET SUBMODULE INIT — add yours here.
+	m.Me = me.Initialize(db)
+	m.Config = config.Initialize(db)
 
 	return m
 }
@@ -48,8 +54,8 @@ func (m *Module) SetupRoutes(router *gin.RouterGroup) {
 	v1 := router.Group("/market/v1")
 	v1.Use(middleware.JWTAuth())
 	{
-		_ = v1 // keeps the group referenced until the first submodule mounts
-
 		// MARKET SUBMODULE ROUTES — mount yours here, one line.
+		m.Me.SetupRoutes(v1)
+		m.Config.SetupRoutes(v1)
 	}
 }
