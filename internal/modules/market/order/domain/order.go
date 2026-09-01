@@ -18,8 +18,12 @@ const (
 	ItemStatusPaid   = "paid"
 
 	SourceProduct = "product"
+	SourceGig     = "gig"
 
 	LedgerTypeOrderPayment = "order_payment"
+	// LedgerTypePayout is the positive counterpart: the lapak being paid when
+	// the order completes, whether the customer confirmed or the sweeper did.
+	LedgerTypePayout = "payout"
 )
 
 // OrderStatuses is every status in contract order, used to seed meta.counts so
@@ -125,5 +129,20 @@ type Product struct {
 	ID       string
 	LapakID  string
 	Title    string
+	PriceIDR int64
+}
+
+// GigTier is Product's flow-B counterpart: the catalog row a gig order item is
+// priced from. GigID is carried because the upsell is defined as "another tier
+// of the SAME gig", so adding an item has to compare gigs, and LapakID is
+// resolved through the tier's gig — a tier does not name a lapak itself.
+//
+// The full gig catalog is BE-07A's; these are only the fields the order path
+// snapshots.
+type GigTier struct {
+	ID       string
+	GigID    string
+	LapakID  string
+	Name     string
 	PriceIDR int64
 }

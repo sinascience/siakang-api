@@ -9,6 +9,8 @@
 package order
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -22,10 +24,21 @@ type Module struct {
 	Handler *handler.Handler
 }
 
-// Initialize wires repository, service and handler.
+// Initialize wires repository, service and handler, and starts this module's
+// background half.
+//
+// The auto-confirm sweeper lives here rather than in main.market.go because it
+// is the order module's own clock: it completes overdue orders through exactly
+// the transaction POST /orders/{id}/confirm uses. One goroutine for the
+// process lifetime, on context.Background() — it outlives every request and
+// belongs to no caller.
 func Initialize(db *pgxpool.Pool) *Module {
 	repo := repository.NewRepository(db)
-	return &Module{Handler: handler.NewHandler(service.NewService(repo))}
+	svc := service.NewService(repo)
+
+	go svc.RunSweeper(context.Background(), service.SweepInterval)
+
+	return &Module{Handler: handler.NewHandler(svc)}
 }
 
 // SetupRoutes mounts onto the /market/v1 group, which main.market.go has
@@ -37,4 +50,7 @@ func (m *Module) SetupRoutes(v1 *gin.RouterGroup) {
 	v1.GET("/orders", m.Handler.ListOrders)
 	v1.GET("/orders/:id", m.Handler.GetOrder)
 	v1.POST("/orders/:id/pay", m.Handler.PayOrder)
+	v1.POST("/orders/:id/items", m.Handler.AddItem)
+	v1.POST("/orders/:id/complete", m.Handler.Complete)
+	v1.POST("/orders/:id/confirm", m.Handler.Confirm)
 }

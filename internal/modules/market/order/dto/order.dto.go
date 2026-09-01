@@ -22,10 +22,20 @@ type CreateOrderRequest struct {
 	// money surprise. Nil means absent and defaults to 1; 0 is rejected.
 	Quantity *int `json:"quantity" binding:"omitempty,min=1"`
 
-	// GigTierID is accepted so the contract's request shape round-trips and
-	// so BE-07's flow B is a branch here rather than a rewrite. Phase 2
-	// rejects it: there is no half-finished gig path behind this field.
+	// GigTierID selects flow B: the order is priced from this tier, its
+	// lapak is the tier's gig's lapak, and Quantity is ignored.
 	GigTierID string `json:"gig_tier_id" binding:"omitempty,uuid"`
+}
+
+// AddOrderItemRequest is the POST /market/v1/orders/{id}/items body — the
+// flow-B upsell. Required, not omitempty: unlike CreateOrderRequest there is
+// no second field it could be traded against, so an absent tier is a 422 and
+// not an ambiguity.
+//
+// There is no quantity and no price. The tier is bought once, at the price the
+// catalog says.
+type AddOrderItemRequest struct {
+	GigTierID string `json:"gig_tier_id" binding:"required,uuid"`
 }
 
 // OrderIDParam validates {id} before it reaches SQL. A non-uuid id cannot name

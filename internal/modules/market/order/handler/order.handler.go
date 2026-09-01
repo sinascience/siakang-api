@@ -63,11 +63,10 @@ func (h *Handler) CreateOrder(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrLapakCannotOrder):
 			response.Error(c, http.StatusForbidden, "Only customers can create orders", err.Error())
-		case errors.Is(err, service.ErrGigNotSupported):
-			response.ValidationError(c, http.StatusUnprocessableEntity, "Validation failed",
-				map[string][]string{"gig_tier_id": {err.Error()}})
 		case errors.Is(err, repository.ErrProductNotFound):
 			response.Error(c, http.StatusNotFound, "Product not found", err.Error())
+		case errors.Is(err, repository.ErrGigTierNotFound):
+			response.Error(c, http.StatusNotFound, "Gig tier not found", err.Error())
 		default:
 			response.Error(c, http.StatusInternalServerError, "Failed to create order", err.Error())
 		}
@@ -176,4 +175,112 @@ func (h *Handler) ListOrders(c *gin.Context) {
 	// request drives all the tab badges.
 	response.SuccessWithPaginationAndCounts(c, http.StatusOK, "Orders retrieved successfully",
 		items, params.Page, params.Limit, total, counts)
+}
+
+// AddItem handles POST /market/v1/orders/{id}/items — the flow-B upsell.
+// Customer only; the lapak proposed the tier in chat, and this call is the
+// customer agreeing.
+func (h *Handler) AddItem(c *gin.Context) {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "Unauthorized", err.Error())
+		return
+	}
+
+	var param dto.OrderIDParam
+	if err := c.ShouldBindUri(&param); err != nil {
+		response.Error(c, http.StatusNotFound, "Order not found", "no such order")
+		return
+	}
+
+	var req dto.AddOrderItemRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ValidationError(c, http.StatusUnprocessableEntity, "Validation failed",
+			map[string][]string{"gig_tier_id": {err.Error()}})
+		return
+	}
+
+	order, err := h.svc.AddItem(c.Request.Context(), userID, param.ID, req.GigTierID)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrOrderNotFound):
+			response.Error(c, http.StatusNotFound, "Order not found", err.Error())
+		case errors.Is(err, repository.ErrGigTierNotFound):
+			response.Error(c, http.StatusNotFound, "Gig tier not found", err.Error())
+		case errors.Is(err, service.ErrOrderNotAcceptingItems),
+			errors.Is(err, service.ErrTierDifferentGig):
+			response.Error(c, http.StatusConflict, "Cannot add this item to the order", err.Error())
+		default:
+			response.Error(c, http.StatusInternalServerError, "Failed to add order item", err.Error())
+		}
+		return
+	}
+
+	response.Success(c, http.StatusCreated, "Order item added successfully", dto.NewOrderResponse(order))
+}
+
+// Complete handles POST /market/v1/orders/{id}/complete. The order's lapak
+// only — the customer gets the same 404 a stranger gets, because a 403 would
+// confirm the order exists.
+func (h *Handler) Complete(c *gin.Context) {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "Unauthorized", err.Error())
+		return
+	}
+
+	var param dto.OrderIDParam
+	if err := c.ShouldBindUri(&param); err != nil {
+		response.Error(c, http.StatusNotFound, "Order not found", "no such order")
+		return
+	}
+
+	order, err := h.svc.Complete(c.Request.Context(), userID, param.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrOrderNotFound):
+			response.Error(c, http.StatusNotFound, "Order not found", err.Error())
+		case errors.Is(err, service.ErrOutstandingItems),
+			errors.Is(err, repository.ErrOrderNotPaid):
+			response.Error(c, http.StatusConflict, "Order cannot be completed yet", err.Error())
+		default:
+			response.Error(c, http.StatusInternalServerError, "Failed to complete order", err.Error())
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, "Order awaiting customer confirmation", dto.NewOrderResponse(order))
+}
+
+// Confirm handles POST /market/v1/orders/{id}/confirm — the customer's half of
+// the payout. If the sweeper got there first this still answers 200 with the
+// already-completed order, which is why "already completed" is not an error
+// the switch below has to know about.
+func (h *Handler) Confirm(c *gin.Context) {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		response.Error(c, http.StatusUnauthorized, "Unauthorized", err.Error())
+		return
+	}
+
+	var param dto.OrderIDParam
+	if err := c.ShouldBindUri(&param); err != nil {
+		response.Error(c, http.StatusNotFound, "Order not found", "no such order")
+		return
+	}
+
+	order, err := h.svc.Confirm(c.Request.Context(), userID, param.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrOrderNotFound):
+			response.Error(c, http.StatusNotFound, "Order not found", err.Error())
+		case errors.Is(err, service.ErrNotAwaitingConfirmation):
+			response.Error(c, http.StatusConflict, "Order is not awaiting confirmation", err.Error())
+		default:
+			response.Error(c, http.StatusInternalServerError, "Failed to confirm order", err.Error())
+		}
+		return
+	}
+
+	response.Success(c, http.StatusOK, "Order confirmed successfully", dto.NewOrderResponse(order))
 }

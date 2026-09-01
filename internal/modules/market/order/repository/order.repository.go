@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,14 @@ var (
 	// ErrProductNotFound covers a missing, soft-deleted, or dead-lapak
 	// product.
 	ErrProductNotFound = errors.New("product not found")
+
+	// ErrGigTierNotFound is its flow-B twin: a missing, soft-deleted, or
+	// dead-gig/dead-lapak tier.
+	ErrGigTierNotFound = errors.New("gig tier not found")
+
+	// ErrOrderNotPaid is /complete's 409: the order was not in status `paid`
+	// when the UPDATE ran, so no countdown was started.
+	ErrOrderNotPaid = errors.New("order is not in status paid")
 )
 
 // DB is the subset of pgx that both *pgxpool.Pool and pgx.Tx satisfy. Every
@@ -120,12 +129,17 @@ func (r *Repository) InsertOrder(ctx context.Context, db DB, source, customerUse
 // and is never written. status defaults to 'unpaid' with payment_id NULL,
 // which is the only pairing chk_order_items_paid_has_payment allows before a
 // charge exists.
-func (r *Repository) InsertOrderItem(ctx context.Context, db DB, orderID string, productID *string, name string, unitPriceIDR int64, quantity int) error {
+//
+// productID and gigTierID are the two catalog sources, and at most one is
+// non-nil (chk_order_items_one_source rejects both at once). One insert serves
+// the product order, the gig order and the flow-B upsell rather than three
+// that could drift about what a snapshot means.
+func (r *Repository) InsertOrderItem(ctx context.Context, db DB, orderID string, productID, gigTierID *string, name string, unitPriceIDR int64, quantity int) error {
 	const query = `
-		INSERT INTO market.order_items (order_id, product_id, name, unit_price_idr, quantity)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO market.order_items (order_id, product_id, gig_tier_id, name, unit_price_idr, quantity)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`
-	if _, err := db.Exec(ctx, query, orderID, productID, name, unitPriceIDR, quantity); err != nil {
+	if _, err := db.Exec(ctx, query, orderID, productID, gigTierID, name, unitPriceIDR, quantity); err != nil {
 		logger.Error("Failed to insert order item", logger.Err(err))
 		return err
 	}
@@ -383,12 +397,13 @@ func (r *Repository) loadPayments(ctx context.Context, db DB, orderIDs []string)
 // transaction opened by the service; none of them is safe to call on the pool.
 // =====================================================================
 
-// FindPayableOrder resolves {id} for the pay path: it must exist AND the
-// caller must be its CUSTOMER. A lapak is a legitimate participant on its own
-// orders for reads, but it is not the payer, and POST /pay has no 403 in the
-// contract — so anyone who is not the customer gets ErrOrderNotFound, the same
-// answer a stranger gets.
-func (r *Repository) FindPayableOrder(ctx context.Context, db DB, orderID, customerUserID string) error {
+// FindCustomerOrder resolves {id} for the customer's verbs — /pay, /items and
+// /confirm: the order must exist AND the caller must be its CUSTOMER. A lapak
+// is a legitimate participant on its own orders for reads, but it is neither
+// the payer nor the confirmer, so anyone who is not the customer gets
+// ErrOrderNotFound and the 404 a stranger gets rather than a 403 that would
+// confirm the order exists.
+func (r *Repository) FindCustomerOrder(ctx context.Context, db DB, orderID, customerUserID string) error {
 	const query = `SELECT 1 FROM market.orders WHERE id = $1 AND customer_user_id = $2`
 
 	var one int
@@ -557,4 +572,280 @@ func (r *Repository) EnsureChatThread(ctx context.Context, db DB, orderID string
 		return err
 	}
 	return nil
+}
+
+// =====================================================================
+// Flow B — gig tiers, upsell, complete and the payout
+// =====================================================================
+
+// FindGigTier loads the tier an order item is priced from: the flow-B twin of
+// FindProduct, and the same rule — the price and the name come from this row,
+// never from the request.
+//
+// The joins are the guard FindProduct uses: a tier whose gig or lapak has been
+// soft-deleted cannot back a new order, because that order would name a lapak
+// no read can summarize.
+func (r *Repository) FindGigTier(ctx context.Context, db DB, tierID string) (*domain.GigTier, error) {
+	const query = `
+		SELECT t.id, t.gig_id, g.lapak_id, t.name, t.price_idr
+		FROM market.gig_tiers t
+		JOIN market.gigs g ON g.id = t.gig_id AND g.deleted_at IS NULL
+		JOIN market.lapak_profiles l ON l.id = g.lapak_id AND l.deleted_at IS NULL
+		WHERE t.id = $1 AND t.deleted_at IS NULL
+	`
+	var t domain.GigTier
+	err := db.QueryRow(ctx, query, tierID).Scan(&t.ID, &t.GigID, &t.LapakID, &t.Name, &t.PriceIDR)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrGigTierNotFound
+		}
+		logger.Error("Failed to find gig tier", logger.Err(err))
+		return nil, err
+	}
+	return &t, nil
+}
+
+// FindOrderForUpsell answers POST /orders/{id}/items' two questions in one
+// round trip: may this caller add to this order (ownership, in the WHERE
+// clause), and which gig is the order already about.
+//
+// gigID is NULL for a product or bid order, which is exactly why the service
+// can reject "another tier of the same gig" for an order that has no gig: a
+// NULL can never equal the new tier's gig id.
+func (r *Repository) FindOrderForUpsell(ctx context.Context, db DB, orderID, customerUserID string) (string, *string, error) {
+	const query = `
+		SELECT o.status,
+		       (SELECT gt.gig_id
+		          FROM market.order_items oi
+		          JOIN market.gig_tiers gt ON gt.id = oi.gig_tier_id
+		         WHERE oi.order_id = o.id
+		         LIMIT 1)
+		FROM market.orders o
+		WHERE o.id = $1 AND o.customer_user_id = $2
+		FOR UPDATE OF o
+	`
+	var status string
+	var gigID *string
+	err := db.QueryRow(ctx, query, orderID, customerUserID).Scan(&status, &gigID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil, ErrOrderNotFound
+		}
+		logger.Error("Failed to load order for upsell", logger.Err(err))
+		return "", nil, err
+	}
+	return status, gigID, nil
+}
+
+// FindLapakOrder resolves {id} for POST /orders/{id}/complete: it must exist
+// AND the caller must be its LAPAK. The customer is a participant for reads,
+// but completing is the worker's verb, so anyone else — the customer
+// included — gets ErrOrderNotFound and a 404, the same answer a stranger gets.
+func (r *Repository) FindLapakOrder(ctx context.Context, db DB, orderID, lapakID string) (string, error) {
+	const query = `SELECT status FROM market.orders WHERE id = $1 AND lapak_id = $2 FOR UPDATE`
+
+	var status string
+	err := db.QueryRow(ctx, query, orderID, lapakID).Scan(&status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrOrderNotFound
+		}
+		logger.Error("Failed to load order for completion", logger.Err(err))
+		return "", err
+	}
+	return status, nil
+}
+
+// AutoConfirmSeconds reads the confirmation window from market.config.
+//
+// It is read, never hard-coded: QA edits that row to shorten the window, and a
+// literal 60 here would silently ignore them. A missing key is an error rather
+// than a zero — a zero-second window would auto-confirm every order on the
+// sweeper's next tick.
+//
+// ponytail: one key, one query. The config submodule's typed reader wants all
+// three keys and its own pool rather than this transaction, so borrowing it
+// would cost a cross-module dependency to save four lines of SQL.
+func (r *Repository) AutoConfirmSeconds(ctx context.Context, db DB) (int64, error) {
+	const query = `SELECT value FROM market.config WHERE key = 'order_auto_confirm_seconds'`
+
+	var seconds int64
+	if err := db.QueryRow(ctx, query).Scan(&seconds); err != nil {
+		logger.Error("Failed to read order_auto_confirm_seconds", logger.Err(err))
+		return 0, err
+	}
+	return seconds, nil
+}
+
+// MarkAwaitingConfirmation is the whole of /complete's write: the status moves
+// and the clock starts. No money moves here.
+//
+// The deadline is computed by the database from NOW(), not from a Go time, so
+// it is on the same clock the sweeper compares against. AND status = 'paid'
+// makes a second /complete a no-op rather than a restarted countdown: no rows
+// come back and the service answers 409.
+func (r *Repository) MarkAwaitingConfirmation(ctx context.Context, db DB, orderID string, seconds int64) (*time.Time, error) {
+	const query = `
+		UPDATE market.orders
+		SET status = 'awaiting_confirmation',
+		    confirm_deadline_at = NOW() + make_interval(secs => $2::double precision),
+		    updated_at = NOW()
+		WHERE id = $1 AND status = 'paid'
+		RETURNING confirm_deadline_at
+	`
+	var deadline time.Time
+	err := db.QueryRow(ctx, query, orderID, seconds).Scan(&deadline)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrOrderNotPaid
+		}
+		logger.Error("Failed to mark order awaiting confirmation", logger.Err(err))
+		return nil, err
+	}
+	return &deadline, nil
+}
+
+// =====================================================================
+// Payout — the second money path. Called only from the service's single
+// completion transaction, shared by /confirm and the sweeper.
+// =====================================================================
+
+// LockOrderForCompletion takes a row lock on the order and returns its status
+// as of the lock, plus the USER id behind its lapak profile.
+//
+// This lock is the double-payout guard. /confirm and the sweeper can target the
+// same order at the same moment; both pass through here, so the loser blocks
+// until the winner commits and then re-reads a row that already says
+// completed. FOR UPDATE OF o keeps the lock on the order alone — the lapak
+// profile is joined for its user_id, not locked.
+//
+// market.wallets is keyed by user_id and orders.lapak_id is a lapak_profiles
+// id, so this join is what points the credit at the right wallet.
+func (r *Repository) LockOrderForCompletion(ctx context.Context, db DB, orderID string) (string, string, error) {
+	const query = `
+		SELECT o.status, l.user_id
+		FROM market.orders o
+		JOIN market.lapak_profiles l ON l.id = o.lapak_id
+		WHERE o.id = $1
+		FOR UPDATE OF o
+	`
+	var status, lapakUserID string
+	err := db.QueryRow(ctx, query, orderID).Scan(&status, &lapakUserID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", ErrOrderNotFound
+		}
+		logger.Error("Failed to lock order for completion", logger.Err(err))
+		return "", "", err
+	}
+	return status, lapakUserID, nil
+}
+
+// SumPaid totals the items the customer actually paid for — the amount the
+// lapak is credited. /complete refuses an order with any outstanding item, so
+// on this path it equals the order total; computing the payout from what was
+// PAID keeps the credit honest even if that ever stops being true.
+func (r *Repository) SumPaid(ctx context.Context, db DB, orderID string) (int64, error) {
+	const query = `
+		SELECT COALESCE(SUM(subtotal_idr), 0)
+		FROM market.order_items
+		WHERE order_id = $1 AND status = 'paid'
+	`
+	var total int64
+	if err := db.QueryRow(ctx, query, orderID).Scan(&total); err != nil {
+		logger.Error("Failed to sum paid order items", logger.Err(err))
+		return 0, err
+	}
+	return total, nil
+}
+
+// CreditWallet moves money INTO a wallet and returns what the balance became,
+// which is the value the payout ledger row must record.
+//
+// The arithmetic is in SQL on the row the statement itself locks, so two
+// credits can never both build a balance from the same stale read. The upsert
+// provisions a wallet for a lapak who has never had one — a payout is the
+// first money most lapaks ever see, and dropping it because a row was missing
+// would be a silent loss.
+func (r *Repository) CreditWallet(ctx context.Context, db DB, userID string, amountIDR int64) (int64, error) {
+	const query = `
+		INSERT INTO market.wallets (user_id, balance_idr)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE
+		SET balance_idr = market.wallets.balance_idr + EXCLUDED.balance_idr,
+		    updated_at = NOW()
+		RETURNING balance_idr
+	`
+	var balance int64
+	if err := db.QueryRow(ctx, query, userID, amountIDR).Scan(&balance); err != nil {
+		logger.Error("Failed to credit wallet", logger.Err(err))
+		return 0, err
+	}
+	return balance, nil
+}
+
+// MarkOrderCompleted is the last statement of the payout and its last defence:
+// AND status = 'awaiting_confirmation' means a row that somehow completed
+// between the lock and here affects 0 rows, and the service rolls the credit
+// back rather than paying twice.
+//
+// autoConfirmed is the ONLY thing that differs between the customer's /confirm
+// and the sweeper. completed_at comes from NOW() because
+// chk_orders_completed_at requires it, and chk_orders_auto_confirmed tolerates
+// the flag only on a completed row.
+func (r *Repository) MarkOrderCompleted(ctx context.Context, db DB, orderID string, autoConfirmed bool) (int64, error) {
+	const query = `
+		UPDATE market.orders
+		SET status = 'completed', completed_at = NOW(), auto_confirmed = $2, updated_at = NOW()
+		WHERE id = $1 AND status = 'awaiting_confirmation'
+	`
+	tag, err := db.Exec(ctx, query, orderID, autoConfirmed)
+	if err != nil {
+		logger.Error("Failed to mark order completed", logger.Err(err))
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// FindOverdueOrders is the sweeper's only query: orders whose confirmation
+// window has elapsed. It hits idx_orders_confirm_deadline (partial, on
+// status = 'awaiting_confirmation') and returns nothing almost every tick,
+// which is the point — a sweep that finds nothing costs one index probe.
+//
+// NOW() is the database's clock, the same one MarkAwaitingConfirmation wrote
+// the deadline from, so the window means the same thing at both ends however
+// far the app server's clock has drifted.
+//
+// The LIMIT keeps one tick bounded; anything past it is swept on the next one.
+func (r *Repository) FindOverdueOrders(ctx context.Context, db DB, limit int) ([]string, error) {
+	const query = `
+		SELECT id
+		FROM market.orders
+		WHERE status = 'awaiting_confirmation'
+		  AND confirm_deadline_at IS NOT NULL
+		  AND confirm_deadline_at <= NOW()
+		ORDER BY confirm_deadline_at
+		LIMIT $1
+	`
+	rows, err := db.Query(ctx, query, limit)
+	if err != nil {
+		logger.Error("Failed to find overdue orders", logger.Err(err))
+		return nil, err
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			logger.Error("Failed to scan overdue order id", logger.Err(err))
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		logger.Error("Failed to iterate overdue orders", logger.Err(err))
+		return nil, err
+	}
+	return ids, nil
 }
