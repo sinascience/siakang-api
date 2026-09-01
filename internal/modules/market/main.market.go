@@ -20,6 +20,7 @@ import (
 	"siakang-api/internal/middleware"
 	"siakang-api/internal/modules/market/chat"
 	"siakang-api/internal/modules/market/config"
+	"siakang-api/internal/modules/market/gig"
 	"siakang-api/internal/modules/market/me"
 	"siakang-api/internal/modules/market/order"
 	"siakang-api/internal/modules/market/product"
@@ -38,6 +39,7 @@ type Module struct {
 	Product *product.Module
 	Order   *order.Module
 	Chat    *chat.Module
+	Gig     *gig.Module
 }
 
 // Initialize builds every marketplace submodule.
@@ -51,6 +53,7 @@ func Initialize(db *pgxpool.Pool) *Module {
 	m.Product = product.Initialize(db)
 	m.Order = order.Initialize(db)
 	m.Chat = chat.Initialize(db)
+	m.Gig = gig.Initialize(db)
 
 	return m
 }
@@ -73,6 +76,7 @@ func (m *Module) SetupRoutes(router *gin.RouterGroup) {
 		m.Product.SetupRoutes(v1)
 		m.Order.SetupRoutes(v1)
 		m.Chat.SetupRoutes(v1)
+		m.Gig.SetupRoutes(v1)
 	}
 
 	// Outside the group on purpose: the chat SSE stream takes its token from
