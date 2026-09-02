@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"siakang-api/internal/config"
 	"siakang-api/internal/middleware"
 	"time"
@@ -62,7 +63,7 @@ func Setup(router *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 
 	// CORS middleware configuration
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000", "http://localhost:3001", "http://localhost:8081", "https://app.tuai.id", "https://jesuit.venturo.pro", "https://skeleton.venturo.id"},
+		AllowOrigins:     devAndProdOrigins(),
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -223,4 +224,33 @@ func Setup(router *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 	marketModule.SetupRoutes(router.Group(""))
 
 	log.Info("Routes setup completed", zap.Int("routes", len(router.Routes())))
+}
+
+// devAndProdOrigins is the CORS allow-list.
+//
+// The localhost 3000-3019 range exists because this pipeline fans work out to
+// parallel agent worktrees, each needing its own dev-server port. An origin
+// missing from this list does NOT surface as a CORS error: the browser reports
+// an opaque "Network Error" that reads like a broken frontend. 3002 was absent
+// during phase 4 and escaped notice only because that agent's work was
+// mocks-only; 3005 cost a debugging cycle. Twenty slots is deliberately more
+// than we expect to use, so the list stops being something anyone maintains.
+//
+// It is written as an explicit range on purpose. The tempting alternative — an
+// AllowOriginFunc matching any http://localhost:<port> — must NOT ship: with
+// AllowCredentials true, it would make any process able to bind a localhost
+// port on a deployed host a trusted origin. Every entry here visibly says
+// localhost, so this cannot leak into production by accident.
+//
+// 5173 is the owner's manual runs; 8081 is QA. Do not remove either.
+func devAndProdOrigins() []string {
+	origins := []string{"http://localhost:5173", "http://localhost:8081"}
+	for port := 3000; port <= 3019; port++ {
+		origins = append(origins, fmt.Sprintf("http://localhost:%d", port))
+	}
+	return append(origins,
+		"https://app.tuai.id",
+		"https://jesuit.venturo.pro",
+		"https://skeleton.venturo.id",
+	)
 }
