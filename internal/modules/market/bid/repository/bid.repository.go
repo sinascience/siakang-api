@@ -434,6 +434,28 @@ const visibility = `(
 	        SELECT 1 FROM market.bid_offers o WHERE o.bid_id = b.id AND o.lapak_id = $2))
 	)`
 
+// listScope is GET /bids, and it is deliberately NARROWER than visibility
+// above. The contract enumerates this list exactly: "a customer sees the bids
+// they created; a lapak sees `open` manual bids in any category plus the
+// automatic bids they were matched to."
+//
+// So a lapak's own awarded bid is NOT here, even though they can still read it
+// through visibility — once a bid is awarded the tracked order carries the
+// work, and the bid list is an inbox of things still to act on. Widening this
+// to match visibility would put settled bids in that inbox.
+//
+// b.matched_lapak_id is only ever set on an automatic bid, so that arm means
+// "the automatic bids they were matched to" without naming the mode.
+// $2 carries an explicit ::uuid because its FIRST appearance here is a bare
+// IS NOT NULL test, which gives Postgres nothing to infer a type from
+// (SQLSTATE 42P08). The wider visibility fragment happens to compare it to a
+// uuid column first and so never needed the cast.
+const listScope = `(
+	    b.customer_user_id = $1
+	 OR ($2::uuid IS NOT NULL AND b.mode = 'manual' AND b.status = 'open')
+	 OR b.matched_lapak_id = $2
+	)`
+
 func scanBid(row pgx.Row) (*domain.Bid, error) {
 	var (
 		b                  domain.Bid
@@ -507,10 +529,9 @@ func (r *Repository) BidExists(ctx context.Context, db DB, bidID string) (bool, 
 
 // ListBids returns one page of the bids relevant to the caller, newest first.
 //
-// The persona scoping is the server's and reuses the same visibility fragment
-// as the detail read: a customer sees the bids they created, a lapak sees open
-// manual bids plus the automatic bids they were matched to. There is no query
-// parameter that chooses whose bids come back.
+// The persona scoping is the server's, and it uses listScope rather than the
+// wider visibility fragment the detail read uses — see the comment there.
+// There is no query parameter that chooses whose bids come back.
 //
 // ORDER BY carries `, b.id DESC` as a tiebreak, not decoration: created_at
 // defaults to NOW(), the TRANSACTION timestamp, so rows written together share
@@ -521,7 +542,7 @@ func (r *Repository) ListBids(ctx context.Context, db DB, userID string, lapakID
 	// concatenating a different query string.
 	const filters = ` AND ($3::text IS NULL OR b.mode = $3) AND ($4::text IS NULL OR b.status = $4)`
 
-	countQuery := `SELECT COUNT(*) FROM market.bids b WHERE ` + visibility + filters
+	countQuery := `SELECT COUNT(*) FROM market.bids b WHERE ` + listScope + filters
 	var total int64
 	if err := db.QueryRow(ctx, countQuery, userID, lapakID, mode, status).Scan(&total); err != nil {
 		logger.Error("Failed to count bids", logger.Err(err))
@@ -531,7 +552,7 @@ func (r *Repository) ListBids(ctx context.Context, db DB, userID string, lapakID
 		return []*domain.Bid{}, 0, nil
 	}
 
-	dataQuery := `SELECT ` + bidColumns + bidJoins + ` WHERE ` + visibility + filters +
+	dataQuery := `SELECT ` + bidColumns + bidJoins + ` WHERE ` + listScope + filters +
 		` ORDER BY b.created_at DESC, b.id DESC LIMIT $5 OFFSET $6`
 
 	rows, err := db.Query(ctx, dataQuery, userID, lapakID, mode, status, limit, (page-1)*limit)
