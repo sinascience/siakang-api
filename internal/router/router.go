@@ -63,9 +63,14 @@ func Setup(router *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 
 	// CORS middleware configuration
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     devAndProdOrigins(),
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key"},
+		AllowOrigins: devAndProdOrigins(),
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		// X-Market-Profile is not a CORS-simple header, so every browser
+		// request carrying it is preflighted and dropped unless it is named
+		// here. FE sets it unconditionally in the shared axios interceptor,
+		// so omitting it fails every marketplace request with an opaque
+		// "Network Error" and no server-side trace beyond an OPTIONS.
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Market-Profile"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
